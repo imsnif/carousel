@@ -50,6 +50,27 @@ impl ZellijPlugin for State {
                             should_render = true;
                         }
                     }
+                    BareKey::Enter if key.has_no_modifiers() => {
+                        if let Some(selected_pane_id) = self.marked_panes.get(self.selected_index) {
+                            focus_pane_with_id(*selected_pane_id, true);
+                        }
+                    }
+                    BareKey::Delete if key.has_no_modifiers() => {
+                        if self.marked_panes.get(self.selected_index).is_some() {
+                            self.marked_panes.remove(self.selected_index);
+                            self.selected_index = self.selected_index.saturating_sub(1);
+                            should_render = true;
+                        }
+                    }
+                    BareKey::Esc if key.has_no_modifiers() => {
+                        hide_self();
+                    }
+                    BareKey::Char(character) if key.has_no_modifiers() => {
+                        let pane_index = (character as usize).saturating_sub(48); // '0' to 0
+                        if let Some(selected_pane_id) = self.marked_panes.get(pane_index) {
+                            focus_pane_with_id(*selected_pane_id, true);
+                        }
+                    }
                     _ => {}
                 }
             }

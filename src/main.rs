@@ -1,12 +1,13 @@
 use zellij_tile::prelude::*;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Default)]
 struct State {
     marked_panes: Vec<PaneId>,
     selected_index: usize,
     keybinds: Keybinds,
+    workspace_state: WorkspaceState,
     mock_data: BTreeMap<PaneId, String>
 }
 
@@ -23,7 +24,14 @@ impl ZellijPlugin for State {
         self.mock_data.insert(PaneId::Terminal(2), "Terminal 2 title".to_owned());
         self.marked_panes.push(PaneId::Terminal(1));
         self.marked_panes.push(PaneId::Terminal(2));
-        subscribe(&[EventType::Key]);
+        let plugin_ids = get_plugin_ids();
+        self.workspace_state.set_own_plugin_id(plugin_ids.plugin_id);
+        request_permission(&[
+            PermissionType::ReadApplicationState,
+            PermissionType::Reconfigure,
+            PermissionType::ChangeApplicationState
+        ]);
+        subscribe(&[EventType::Key, EventType::ModeUpdate]);
     }
     fn update(&mut self, event: Event) -> bool {
         let mut should_render = false;
@@ -45,16 +53,27 @@ impl ZellijPlugin for State {
                     _ => {}
                 }
             }
+            Event::ModeUpdate(mode_info) => {
+                match (mode_info.base_mode, self.workspace_state.get_own_plugin_id()) {
+                    (Some(base_mode), Some(own_plugin_id)) => {
+                        self.keybinds.bind_key_if_not_bound(base_mode, own_plugin_id);
+                    },
+                    _ => {}
+                }
+            }
             _ => {}
         }
         should_render
     }
-    fn pipe (&mut self, pipe_message: PipeMessage) -> bool {
+    fn pipe(&mut self, pipe_message: PipeMessage) -> bool {
         let mut should_render = false;
-        // react to data piped to this plugin from the CLI, a keybinding or another plugin
-        // read more about pipes: https://zellij.dev/documentation/plugin-pipes
-        // return true if this plugin's `render` function should be called for the plugin to render
-        // itself
+        if pipe_message.source == PipeSource::Keybind && pipe_message.is_private {
+            if pipe_message.name == "mark_pane" {
+                should_render = self.mark_focused_pane();
+            } else if pipe_message.name == "show_self" {
+                show_self(true);
+            }
+        }
         should_render
     }
     fn render(&mut self, rows: usize, cols: usize) {
@@ -172,6 +191,12 @@ impl State {
         }
         (list_item, list_item_text.chars().count())
     }
+    fn mark_focused_pane(&mut self) -> bool {
+        let mut should_render = false;
+        eprintln!("Unimplemented!");
+        should_render = true;
+        should_render
+    }
 }
 
 struct Keybinds {
@@ -188,4 +213,58 @@ impl Default for Keybinds {
             show_self_shortcut: KeyWithModifier::new(BareKey::Char('o')).with_ctrl_modifier().with_shift_modifier(),
         }
     }
+}
+
+impl Keybinds {
+    pub fn bind_key_if_not_bound(&mut self, base_mode: InputMode, own_plugin_id: u32) {
+        if !self.bound_key {
+            bind_key(base_mode, own_plugin_id, &self.mark_pane_shortcut, &self.show_self_shortcut);
+            self.bound_key = true;
+        }
+    }
+}
+
+#[derive(Default)]
+struct WorkspaceState {
+    focused_pane_id: Option<PaneId>,
+    active_tab_position_and_floating_panes_visible: Option<(usize, bool)>,
+    latest_pane_manifest: Option<PaneManifest>,
+    pane_titles: HashMap<PaneId, String>, // String -> pane title
+    own_plugin_id: Option<u32>,
+}
+
+impl WorkspaceState {
+    pub fn set_own_plugin_id(&mut self, plugin_id: u32) {
+        self.own_plugin_id = Some(plugin_id);
+    }
+    pub fn get_own_plugin_id(&self) -> Option<u32> {
+        self.own_plugin_id
+    }
+}
+
+pub fn bind_key(base_mode: InputMode, own_plugin_id: u32, mark_pane_shortcut: &KeyWithModifier, show_self_shortcut: &KeyWithModifier) {
+    let new_config = format!(
+        "
+        keybinds {{
+            {:?} {{
+                bind \"{}\" {{
+                    MessagePluginId {} {{
+                        name \"mark_pane\"
+                    }}
+                }}
+                bind \"{}\" {{
+                    MessagePluginId {} {{
+                        name \"show_self\"
+                    }}
+                }}
+            }}
+        }}
+        ",
+        format!("{:?}", base_mode).to_lowercase(),
+        mark_pane_shortcut,
+        own_plugin_id,
+        show_self_shortcut,
+        own_plugin_id
+    );
+    reconfigure(new_config, false);
 }

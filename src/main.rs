@@ -23,12 +23,30 @@ impl ZellijPlugin for State {
         self.mock_data.insert(PaneId::Terminal(2), "Terminal 2 title".to_owned());
         self.marked_panes.push(PaneId::Terminal(1));
         self.marked_panes.push(PaneId::Terminal(2));
+        subscribe(&[EventType::Key]);
     }
     fn update(&mut self, event: Event) -> bool {
         let mut should_render = false;
-        // react to `Event`s that have been subscribed to (and the plugin has permissions for)
-        // return true if this plugin's `render` function should be called for the plugin to render
-        // itself
+        match event {
+            Event::Key(key) => {
+                match key.bare_key {
+                    BareKey::Down if key.has_no_modifiers() => {
+                        if self.selected_index + 1 < self.marked_panes.len() {
+                            self.selected_index += 1;
+                            should_render = true;
+                        }
+                    }
+                    BareKey::Up if key.has_no_modifiers() => {
+                        if self.selected_index > 0 {
+                            self.selected_index -= 1;
+                            should_render = true;
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
         should_render
     }
     fn pipe (&mut self, pipe_message: PipeMessage) -> bool {

@@ -8,7 +8,6 @@ struct State {
     selected_index: usize,
     keybinds: Keybinds,
     workspace_state: WorkspaceState,
-    mock_data: BTreeMap<PaneId, String>
 }
 
 register_plugin!(State);
@@ -20,10 +19,6 @@ register_plugin!(State);
 
 impl ZellijPlugin for State {
     fn load(&mut self, configuration: BTreeMap<String, String>) {
-        self.mock_data.insert(PaneId::Terminal(1), "Terminal 1 title".to_owned());
-        self.mock_data.insert(PaneId::Terminal(2), "Terminal 2 title".to_owned());
-        self.marked_panes.push(PaneId::Terminal(1));
-        self.marked_panes.push(PaneId::Terminal(2));
         let plugin_ids = get_plugin_ids();
         self.workspace_state.set_own_plugin_id(plugin_ids.plugin_id);
         request_permission(&[
@@ -31,7 +26,12 @@ impl ZellijPlugin for State {
             PermissionType::Reconfigure,
             PermissionType::ChangeApplicationState
         ]);
-        subscribe(&[EventType::Key, EventType::ModeUpdate]);
+        subscribe(&[
+            EventType::Key,
+            EventType::ModeUpdate,
+            EventType::TabUpdate,
+            EventType::PaneUpdate
+        ]);
     }
     fn update(&mut self, event: Event) -> bool {
         let mut should_render = false;
@@ -60,6 +60,14 @@ impl ZellijPlugin for State {
                     },
                     _ => {}
                 }
+            }
+            Event::TabUpdate(tab_infos) => {
+                self.workspace_state.update_tab_info(tab_infos);
+                should_render = true;
+            }
+            Event::PaneUpdate(pane_manifest) => {
+                self.workspace_state.update_latest_pane_manifest(pane_manifest);
+                should_render = true;
             }
             _ => {}
         }
@@ -172,9 +180,8 @@ impl State {
     }
     fn render_list_item(&self, pane_id: &PaneId, max_width: usize, i: usize) -> (Text, usize) {
         let mut pane_title = self
-            .mock_data
-            .get(&pane_id)
-            .map(|p| p.as_str())
+            .workspace_state
+            .get_pane_title(&pane_id)
             .unwrap_or("<UNKNOWN>")
             .to_owned();
         let shortcut_len_and_padding = 4;
@@ -192,10 +199,22 @@ impl State {
         (list_item, list_item_text.chars().count())
     }
     fn mark_focused_pane(&mut self) -> bool {
-        let mut should_render = false;
-        eprintln!("Unimplemented!");
-        should_render = true;
-        should_render
+        let mut marked_pane = false;
+        if let Some(focused_pane_id) = self.workspace_state.get_focused_pane_id() {
+            match self.marked_panes.iter().position(|p| p == &focused_pane_id) {
+                Some(existing_pane_id_position) => {
+                    self.marked_panes.remove(existing_pane_id_position);
+                },
+                None => {
+                    if self.marked_panes.len() >= 10 {
+                        self.marked_panes.remove(0);
+                    }
+                    self.marked_panes.push(focused_pane_id.into());
+                }
+            }
+            marked_pane = true;
+        }
+        marked_pane
     }
 }
 
@@ -239,6 +258,54 @@ impl WorkspaceState {
     }
     pub fn get_own_plugin_id(&self) -> Option<u32> {
         self.own_plugin_id
+    }
+    pub fn update_tab_info(&mut self, tab_infos: Vec<TabInfo>) {
+        for tab in tab_infos {
+            if tab.active {
+                let floating_panes_are_visible = tab.are_floating_panes_visible;
+                self.active_tab_position_and_floating_panes_visible = Some((tab.position, floating_panes_are_visible));
+            }
+        }
+        self.update_panes();
+    }
+    pub fn update_latest_pane_manifest(&mut self, pane_manifest: PaneManifest) {
+        self.latest_pane_manifest = Some(pane_manifest);
+        self.update_panes();
+    }
+    fn update_panes(&mut self) {
+        if let Some(pane_manifest) = &self.latest_pane_manifest {
+            for (tab_index, panes_in_tab) in &pane_manifest.panes {
+                if let Some((active_tab_position, floating_panes_are_visible)) = self.active_tab_position_and_floating_panes_visible.as_ref() {
+                    for pane in panes_in_tab {
+                        if pane.is_suppressed {
+                            continue; // TODO: open issue in Zellij, suppressed panes should have
+                                      // their own id reported
+                        }
+                        let pane_id = if pane.is_plugin {
+                            PaneId::Plugin(pane.id)
+                        } else {
+                            PaneId::Terminal(pane.id)
+                        };
+                        if tab_index == active_tab_position &&
+                            pane.is_focused &&
+                            pane.is_floating == *floating_panes_are_visible
+                        {
+                            self.focused_pane_id = Some(pane_id);
+                        }
+                        self.pane_titles.insert(pane_id, pane.title.to_owned());
+                    }
+                }
+            }
+        }
+    }
+    pub fn get_pane_title(&self, pane_id: &PaneId) -> Option<&str> {
+        self
+            .pane_titles
+            .get(&pane_id)
+            .map(|p| p.as_str())
+    }
+    pub fn get_focused_pane_id(&self) -> Option<PaneId> {
+        self.focused_pane_id
     }
 }
 

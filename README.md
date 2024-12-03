@@ -1,4 +1,5 @@
-## About
+
+![carousel](https://github.com/user-attachments/assets/81084a19-c05f-42c0-b853-53df95c18bf6)
 
 Carousel is a [Zellij](https://github.com/zellij-org/zellij) plugin that lets you mark specific panes so that they appear in a quick-jumplist for easy navigation later.
 

@@ -12,13 +12,8 @@ struct State {
 
 register_plugin!(State);
 
-// NOTE: you can start a development environment inside Zellij by running `zellij -l zellij.kdl` in
-// this plugin's folder
-//
-// More info on plugins: https://zellij.dev/documentation/plugins
-
 impl ZellijPlugin for State {
-    fn load(&mut self, configuration: BTreeMap<String, String>) {
+    fn load(&mut self, _configuration: BTreeMap<String, String>) {
         let plugin_ids = get_plugin_ids();
         self.workspace_state.set_own_plugin_id(plugin_ids.plugin_id);
         request_permission(&[
